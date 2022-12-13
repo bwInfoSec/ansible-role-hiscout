@@ -30,7 +30,7 @@ hiscout_webadmin_name: WebAdmin
 
 task_engine_name: TaskEngine
 
-hiscout_database_backup_name:
+hiscout_database_backup_name: HiScoutMaster_3.3.0_BCM_ISM_DS
 hiscout_database_backup_path: '{{ hiscout_tmp }}\{{ hiscout_database_backup_name }}'
 
 hiscout_pdf_filter_path: '{{ program_files_64 }}\Adobe\Adobe PDF iFilter 11 for 64-bit platforms'
@@ -38,13 +38,13 @@ hiscout_pdf_filter: PDFFilter64Setup
 
 hiscout_log: HiScoutService.InstallLog
 
-hiscout_domain: 
+hiscout_domain: ""
 hiscout_cert_path: '{{ hiscout_tmp }}\{{ hiscout_domain }}.p12'
 hiscout_cert_password: ""
 
 mssql_instance_name: MSSQL
-mssql_database_name:
-mssql_database_relocate_name:
+mssql_database_name: HiScout_GRCMaster_330
+mssql_database_relocate_name: "HiScoutMaster_3.2.0"
 
 hiscout_suppress_reboot: false
 
