@@ -1,0 +1,85 @@
+---
+- name: Create {{ hiscout_tmp }}
+  ansible.windows.win_file:
+    path: '{{ hiscout_tmp }}'
+    state: directory
+  tags: install_hiscout
+
+- name: Check if {{ hiscout_exe_path }} exists
+  ansible.windows.win_stat:
+    path: '{{ hiscout_exe_path }}'
+  register: hiscout_exe_check
+  tags: install_hiscout
+
+- name: Copy {{ hiscout_exe_filename }}.exe to {{ hiscout_exe_path }}
+  ansible.windows.win_copy:
+    src: files/{{ hiscout_exe_filename }}.exe
+    dest: '{{ hiscout_exe_path }}'
+    force: false
+  when: not hiscout_exe_check.stat.exists
+  tags: install_hiscout
+
+- name: Check if {{ hiscout_data_path }} exists
+  ansible.windows.win_stat:
+    path: '{{ hiscout_data_path }}'
+  register: hiscout_data_check
+  tags: install_hiscout
+
+- name: Copy {{ hiscout_data_filename }} to {{ hiscout_data_path }}.zip
+  ansible.windows.win_copy:
+    src: files/{{ hiscout_data_filename }}.zip
+    dest: '{{ hiscout_data_path }}.zip'
+    force: false
+  when: not hiscout_data_check.stat.exists
+  tags: install_hiscout
+
+- name: Unzip {{ hiscout_data_path }}.zip to {{ hiscout_data_path }}
+  community.windows.win_unzip:
+    src: '{{ hiscout_data_path }}.zip'
+    dest: C:\
+    delete_archive: true
+  when: not hiscout_data_check.stat.exists
+  tags: install_hiscout
+
+- name: Install {{ hiscout_pdf_filter }}
+  ansible.windows.win_package:
+    path: http://ardownload.adobe.com/pub/adobe/acrobat/win/11.x/{{ hiscout_pdf_filter }}.msi
+    product_id: '{BA5C0CC3-421B-4AE5-9370-1650D1941F30}'
+    state: present
+  tags: install_hiscout
+
+- name: Add {{ hiscout_pdf_filter }} to PATH environment variable
+  ansible.windows.win_path:
+    state: present
+    name: PATH
+    elements: '{{ hiscout_pdf_filter_path }}\bin'
+    scope: machine
+  tags: install_hiscout
+
+- name: Check version of HiScout
+  ansible.windows.win_shell: (Get-WmiObject -Class Win32_Product | where vendor -eq "HiScout GmbH").Version
+  register: hiscout_stat
+  failed_when: hiscout_stat.stderr != ""
+  changed_when: false
+  tags: install_hiscout
+
+- name: Execute {{ hiscout_exe_path }}
+  ansible.windows.win_powershell:
+    script: |
+      & '{{ hiscout_exe_path }}' /s HS_SQLSERVER='{{ ansible_hostname | upper }}\{{ mssql_instance_name }}' HS_SQLCATALOG='{{ mssql_database_name }}' HS_TechUser='{{ ansible_hostname | upper }}\{{ hiscout_tech_user }}' HS_TechPW='{{ hiscout_tech_user_password }}' HS_WebSiteImageDir='{{ hiscout_data_path }}\WebSiteImages' HS_PictureManagerImageDir='{{ hiscout_data_path }}\BilderManager' HS_DataDir='{{ hiscout_data_path }}\Data' HS_WorkDir='{{ hiscout_data_path }}\Work' HS_TempDir='{{ hiscout_data_path }}\Temp' WEB_TARGETDIR='{{ hiscout_web_targetdir }}' HS_WebName='{{ hiscout_web_name }}' SERVER_TARGETDIR='{{ hiscout_program_path }}' HS_APIPORT='9090' HS_WCFPORT='8085'
+  register: hiscout_installation
+  notify: "Restart hiscout"
+  when: hiscout_version not in hiscout_stat.stdout
+  tags: install_hiscout
+
+- name: Get {{ hiscout_log }}
+  ansible.builtin.fetch:
+    src: '{{ hiscout_program_path }}\{{ hiscout_log }}'
+    dest: /tmp/{{ hiscout_log }}
+  when: hiscout_version not in hiscout_stat.stdout
+  tags: install_hiscout
+
+- name: Get info for a single service
+  ansible.windows.win_service_info:
+    name: '{{ hiscout_service_name }}'
+  register: service_info

@@ -1,0 +1,58 @@
+---
+- name: Get system language
+  ansible.builtin.include_role:
+    name: heicloud_windows_ansible.base_roles.get_system_language
+  tags: install_mssql
+
+- name: Include language-specific variables {{ system_language }}.
+  ansible.builtin.include_vars: "{{ system_language }}.yml"
+  tags: install_mssql
+  notify: "Restart hiscout"
+
+# Load required powershell modules
+- name: Powershell | Check for SQLServer DSC Powershell module
+  community.windows.win_psmodule:
+    name: '{{ item }}'
+    state: present
+    allow_clobber: true
+  with_items: '{{ hiscout_psmodules }}'
+
+- name: Ensure that a reboot is not pending
+  when: ansible_reboot_pending
+  ansible.builtin.debug:
+    msg: Pending reboot detected
+  changed_when: false
+  notify: reboot Windows
+  tags:
+    - molecule-idempotence-notest
+
+- name: Flush all handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Configure MSSQL
+  ansible.builtin.include_tasks: configure_mssql.yml
+  tags:
+    - install_hiscout
+    - configure_mssql
+
+- name: Install IIS Webserver
+  ansible.builtin.include_tasks: install_iis.yml
+  tags:
+    - install_hiscout
+    - install_iis
+
+- name: Install HiScout
+  ansible.builtin.include_tasks: install_hiscout.yml
+  tags: install_hiscout
+
+- name: Configure IIS Webserver
+  ansible.builtin.include_tasks: configure_iis.yml
+  tags:
+    - install_hiscout
+    - configure_iis
+
+- name: Configure HiScout
+  ansible.builtin.include_tasks: configure_hiscout.yml
+  tags:
+    - install_hiscout
+    - configure_hiscout

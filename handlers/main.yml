@@ -1,0 +1,20 @@
+---
+- name: Reboot windows
+  ansible.windows.win_reboot:
+    reboot_timeout: 3600
+    post_reboot_delay: 60
+  when: hiscout_suppress_reboot
+
+- name: Restart hiscout
+  ansible.windows.win_service:
+    name: '{{ hiscout_service_name }}'
+    start_mode: auto
+    state: restarted
+    username: '{{ ansible_hostname | upper }}\{{ hiscout_tech_user }}'
+    password: '{{ hiscout_tech_user_password }}'
+    update_password: always
+  changed_when: false
+  when:
+    - hiscout_skip_handler | default("true")
+  tags:
+    - molecule-idempotence-notest

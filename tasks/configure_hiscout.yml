@@ -1,0 +1,59 @@
+---
+- name: Configure {{ hiscout_web_name }}
+  ansible.builtin.template:
+    src: 'templates/HiScoutWeb/Web.config.j2'
+    dest: '{{ hiscout_web_targetdir }}\{{ hiscout_web_name }}\Web.config'
+    mode: 0644
+    backup: true
+  tags:
+    - configure_hiscout
+    - install_hiscout
+
+- name: Configure {{ hiscout_web_name }} Plugin WebAdmin
+  ansible.builtin.template:
+    src: 'templates/HiScoutWeb/Plugins/WebAdmin/Web.config.j2'
+    dest: '{{ hiscout_web_targetdir }}\{{ hiscout_web_name }}\Plugins\WebAdmin\Web.config'
+    mode: 0644
+    backup: true
+  tags:
+    - configure_hiscout
+    - install_hiscout
+
+- name: Configure {{ hiscout_web_name }}
+  ansible.builtin.template:
+    src: 'templates/HiScoutService.exe.config.j2'
+    dest: '{{ hiscout_program_path }}\{{ item }}'
+    mode: 0644
+    backup: true
+  with_items:
+    - HiScoutService.exe.config
+    - HiScoutServerConsole.exe.config
+  tags:
+    - configure_hiscout
+    - install_hiscout
+
+- name: Firewall rule to allow HiScout on TCP port 9090
+  community.windows.win_firewall_rule:
+    name: HiScout In
+    localport: 9090
+    action: allow
+    direction: in
+    protocol: tcp
+    state: present
+    enabled: true
+  tags:
+    - configure_hiscout
+    - install_hiscout
+
+- name: Firewall rule to allow HiScout on TCP port 9090
+  community.windows.win_firewall_rule:
+    name: HiScout Out
+    localport: 9090
+    action: allow
+    direction: out
+    protocol: tcp
+    state: present
+    enabled: true
+  tags:
+    - configure_hiscout
+    - install_hiscout

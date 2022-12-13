@@ -1,0 +1,128 @@
+---
+
+- name: Check if database exists
+  ansible.windows.win_shell: "(Get-SqlDatabase -ServerInstance '{{ ansible_hostname | upper }}\\{{ mssql_instance_name }}').Name"
+  register: database_stat
+  failed_when: database_stat.stderr != ""
+  changed_when: false
+  tags:
+    - configure_sql
+    - install_hiscout
+
+- name: Setup database
+  when: "mssql_database_name not in database_stat.stdout"
+  tags:
+    - configure_sql
+    - install_hiscout
+  block:
+    - name: Ensure HiScout {{ hiscout_tech_user }} account is present
+      ansible.windows.win_user:
+        name: "{{ hiscout_tech_user | regex_search('[^\\\\]*$') }}"
+        fullname: HiScout TechUser
+        password: '{{ hiscout_tech_user_password }}'
+        password_never_expires: true
+        user_cannot_change_password: true
+        description: HiScout TechUser {{ ansible_hostname }}\{{ mssql_instance_name }}
+        state: present
+        groups:
+          - '{{ group_users }}'
+          - '{{ group_administrators }}'
+      tags:
+        - configure_sql
+        - install_hiscout
+
+    - name: Add HiScout {{ hiscout_tech_user }} to SqlLogin {{ ansible_hostname }}
+      ansible.windows.win_dsc:
+        resource_name: SqlLogin
+        InstanceName: '{{ mssql_instance_name }}'
+        ServerName: '{{ ansible_hostname }}'
+        LoginType: WindowsUser
+        Ensure: Present
+        Name: '{{ ansible_hostname | upper }}\{{ hiscout_tech_user }}'
+      tags:
+        - configure_sql
+        - install_hiscout
+
+    - name: Check if {{ hiscout_database_backup_name }}.bak exists
+      ansible.windows.win_stat:
+        path: '{{ hiscout_database_backup_path }}'
+      register: hiscout_db_check
+      tags:
+        - configure_sql
+        - install_hiscout
+
+    - name: Copy {{ hiscout_database_backup_name }}.zip to {{ hiscout_database_backup_path }}.zip
+      ansible.windows.win_copy:
+        src: files/{{ hiscout_database_backup_name }}.zip
+        dest: '{{ hiscout_database_backup_path }}.zip'
+        force: false
+      when: not hiscout_db_check.stat.exists
+      tags:
+        - configure_sql
+        - install_hiscout
+
+    - name: Unzip zip file which is password encrypted
+      community.windows.win_unzip:
+        src: '{{ hiscout_database_backup_path }}.zip'
+        dest: '{{ hiscout_database_backup_path }}'
+        password: '{{ hiscout_database_backup_password }}'
+      when: not hiscout_db_check.stat.exists
+      tags:
+        - configure_sql
+        - install_hiscout
+
+    - name: Create {{ mssql_path }}
+      ansible.windows.win_file:
+        path: '{{ mssql_path }}'
+        state: directory
+      tags:
+        - configure_sql
+        - install_hiscout
+
+    - name: Restore {{ mssql_database_name }} on {{ ansible_hostname | upper }}\{{ mssql_instance_name }}
+      ansible.windows.win_powershell:
+        script: |
+          #load assemblies
+          [System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.SMO") | Out-Null
+          #Need SmoExtended for backup
+          [System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.SmoExtended") | Out-Null
+
+          $RelocateData = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("{{ mssql_database_relocate_name }}", "{{ mssql_path }}\{{ mssql_database_name }}.mdf")
+          $RelocateLog = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("{{ mssql_database_relocate_name }}_log", "C:\Userdbvol01\DatabaseLogs\mssql\{{ mssql_database_name }}_log.ldf")
+          $RelocateFileStreamData = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("FileStreamData", "{{ mssql_path }}\{{ mssql_database_name }}_FileTable")
+
+          Restore-SqlDatabase -ServerInstance "{{ ansible_hostname | upper }}\{{ mssql_instance_name }}" -Database "{{ mssql_database_name }}" -BackupFile "{{ hiscout_tmp }}\{{ hiscout_database_backup_name }}\{{ hiscout_database_backup_name }}.bak" -RelocateFile @($RelocateData,$RelocateLog,$RelocateFileStreamData) -ReplaceDatabase
+      register: restore_state
+      failed_when: restore_state.error != []
+      tags:
+        - configure_sql
+        - install_hiscout
+
+    - name: Set db_owner to {{ ansible_hostname | upper }}\{{ hiscout_tech_user }}
+      ansible.windows.win_powershell:
+        script: |
+          Set-DbaDbOwner  -SqlInstance {{ ansible_hostname | upper }}\{{ mssql_instance_name }} -Database "{{ mssql_database_name }}" -TargetLogin "{{ ansible_hostname }}\{{ hiscout_tech_user }}"
+      register: restore_state
+      failed_when: restore_state.error != []
+      tags:
+        - configure_sql
+        - install_hiscout
+
+    - name: Activate indexing of new file types
+      ansible.windows.win_powershell:
+        script: |
+          Invoke-Sqlcmd -Query "{{ item }}" -ServerInstance "{{ ansible_hostname | upper }}\{{ mssql_instance_name }}" -Database "{{ mssql_database_name }}"
+      register: restore_state
+      failed_when: restore_state.error != []
+      with_items:
+        - exec sp_fulltext_service @action='load_os_resources', @value=1; -- update os resources
+        - exec sp_fulltext_service 'verify_signature', 0 -- don't verify signature
+        - exec sp_fulltext_service 'update_languages'; -- update language list
+        - exec sp_fulltext_service 'restart_all_fdhosts'; -- restart daemon
+        - reconfigure with override
+        - ALTER DATABASE CURRENT SET SINGLE_USER WITH ROLLBACK IMMEDIATE --close exisisting connections
+        - ALTER DATABASE CURRENT SET MULTI_USER
+        - ALTER FULLTEXT CATALOG AttachmentStoreCatalog REBUILD WITH ACCENT_SENSITIVITY = OFF -- create document index
+      tags:
+        - configure_sql
+        - install_hiscout

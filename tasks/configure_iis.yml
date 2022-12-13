@@ -1,0 +1,185 @@
+---
+- name: Remove Default Web Site
+  community.windows.win_iis_website:
+    name: Default Web Site
+    state: absent
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Check if {{ hiscout_cert_path }} exists
+  ansible.windows.win_stat:
+    path: "{{ hiscout_cert_path }}"
+  register: hiscout_cert_check
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Copy {{ hiscout_domain }}.pfx to {{ hiscout_cert_path }}
+  ansible.windows.win_copy:
+    src: files/{{ hiscout_domain }}.pfx
+    dest: "{{ hiscout_cert_path }}"
+    force: false
+  when: not hiscout_cert_check.stat.exists
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Import {{ hiscout_domain }}.pfx
+  ansible.windows.win_certificate_store:
+    path: "{{ hiscout_cert_path }}"
+    file_type: pkcs12
+    password: "{{ hiscout_cert_password }}"
+    store_location: LocalMachine
+    key_storage: machine
+    state: present
+  become: true
+  become_method: runas
+  become_user: SYSTEM
+  register: hiscout_cert
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Create a new application pool in 'Started' state
+  community.windows.win_iis_webapppool:
+    name: AppPool
+    state: started
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: "Start {{ iis_site_name }} IIS site"
+  community.windows.win_iis_website:
+    name: "{{ iis_site_name }}"
+    state: started
+    ip: "{{ ansible_host }}"
+    hostname: "{{ hiscout_domain }}"
+    application_pool: AppPool
+    physical_path: "{{ hiscout_web_targetdir }}"
+  register: website
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Print cert thumbprint
+  ansible.builtin.set_fact:
+    thumbprint: "{{ hiscout_cert.thumbprints[-1] }}"
+  tags:
+    - configure_iis
+    - install_hiscout
+
+# Be careful!!!! Certification order matters!!!!
+# Failed to set new SSL certificate - Eine angegebene Anmeldesitzung ist nicht vorhanden. Sie wurde gegebenenfalls bereits beendet. (Exception from HRESULT: 0x80070520)
+# You are trying to use a root cert, not the one you actually own.
+# Change hiscout_cert.thumbprint
+- name: Add {{ hiscout_domain }}.pfx to HTTPS binding {{ hiscout_domain }}
+  community.windows.win_iis_webbinding:
+    name: "{{ iis_site_name }}"
+    protocol: https
+    port: 443
+    ip: "{{ ansible_host }}"
+    host_header: "{{ hiscout_domain }}"
+    ssl_flags: 1
+    certificate_hash: "{{ thumbprint }}"
+    state: present
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Get {{ hiscout_domain }}.pfx info
+  community.windows.win_certificate_info:
+    thumbprint: "{{ thumbprint }}"
+  register: certificate
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Check if Website exists already
+  ansible.windows.win_shell: Get-WebApplication
+  changed_when: false
+  register: webapp_register
+
+- name: Add {{ hiscout_web_name }} webapplication on IIS.
+  community.windows.win_iis_webapplication:
+    name: "{{ hiscout_web_name }}"
+    site: "{{ iis_site_name }}"
+    state: present
+    physical_path: '{{ hiscout_web_targetdir }}\{{ hiscout_web_name }}'
+  changed_when: not hiscout_web_name in webapp_register.stdout
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Add {{ hiscout_webadmin_name }} webapplication on IIS.
+  community.windows.win_iis_webapplication:
+    name: '{{ hiscout_web_name }}\Plugins\{{ hiscout_webadmin_name }}'
+    site: "{{ iis_site_name }}"
+    state: present
+    physical_path: '{{ hiscout_web_targetdir }}\{{ hiscout_web_name }}\Plugins\{{ hiscout_webadmin_name }}'
+  when: not hiscout_webadmin_name in webapp_register.stdout
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Add {{ task_engine_name }} webapplication on IIS.
+  community.windows.win_iis_webapplication:
+    name: '{{ hiscout_web_name }}\Plugins\{{ task_engine_name }}'
+    site: "{{ iis_site_name }}"
+    state: present
+    physical_path: '{{ hiscout_web_targetdir }}\{{ hiscout_web_name }}\Plugins\{{ task_engine_name }}'
+  when: not task_engine_name in webapp_register.stdout
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Remove the default http binding
+  community.windows.win_iis_webbinding:
+    name: "{{ iis_site_name }}"
+    port: 80
+    ip: "{{ ansible_host }}"
+    host_header: "{{ hiscout_domain }}"
+    state: absent
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Check if Website exists already
+  ansible.windows.win_shell: Get-WebVirtualDirectory
+  changed_when: false
+  register: virtualdir_register
+
+- name: Create a virtual directory for {{ hiscout_data_path }}\BilderManager
+  community.windows.win_iis_virtualdirectory:
+    name: pictures
+    site: "{{ iis_site_name }}"
+    application: '{{ hiscout_web_name }}\Plugins\BilderManager'
+    state: present
+    physical_path: '{{ hiscout_data_path }}\BilderManager'
+  when: "not 'BilderManager' in virtualdir_register.stdout"
+  tags:
+    - configure_iis
+    - install_hiscout
+
+- name: Create a virtual directory for {{ hiscout_data_path }}\WebSiteImages
+  community.windows.win_iis_virtualdirectory:
+    name: hiscout_daten
+    site: "{{ iis_site_name }}"
+    application: '{{ hiscout_web_name }}\Plugins\HiScoutWebSite'
+    state: present
+    physical_path: '{{ hiscout_data_path }}\WebSiteImages'
+  when: "not 'WebSiteImages' in virtualdir_register.stdout"
+  tags:
+    - configure_iis
+    - install_hiscout
+  notify: Restart hiscout
+
+- name: Allow loopback address, careful do not use it everywhere since it allows reflection attacks
+  ansible.windows.win_regedit:
+    path: HKLM:\System\CurrentControlSet\Control\Lsa
+    name: DisableLoopbackCheck
+    data: "1"
+    type: dword
+  tags:
+    - configure_iis
+    - install_hiscout
