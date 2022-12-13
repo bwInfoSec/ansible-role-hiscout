@@ -38,7 +38,7 @@ hiscout_pdf_filter: PDFFilter64Setup
 
 hiscout_log: HiScoutService.InstallLog
 
-hiscout_domain: ismsdoku.urz.uni-heidelberg.de
+hiscout_domain: 
 hiscout_cert_path: '{{ hiscout_tmp }}\{{ hiscout_domain }}.p12'
 hiscout_cert_password: ""
 
