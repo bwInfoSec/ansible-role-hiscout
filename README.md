@@ -4,7 +4,16 @@ Ansible Role for [HiScout](https://www.hiscout.com/)
 
 ## Getting Started
 
+Clone this repository into your repository
 
+```sh
+git clone git@github.com:bwInfoSec/ansible-role-hiscout.git
+```
+
+# Role Variables
+
+| Variable                     | Type    | Choices     | Default           | Comment                                                                       |
+|------------------------------|---------|-------------|-------------------|-------------------------------------------------------------------------------|
 
 ## Example Playbook
 
